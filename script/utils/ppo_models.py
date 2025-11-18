@@ -1,14 +1,24 @@
+# PPO模型引擎模块 - 负责初始化和管理PPO训练所需的各种模型
+#
+# 本模块提供了两种PPO模型架构：
+# 1. PPOEngine: 标准的分离架构，actor和critic是独立的模型
+# 2. PPOEngine_CO: Composition架构，单一模型同时处理actor和critic任务
+
 import os,re,sys
-import torch 
-import torch.nn as nn 
-from transformers import AutoConfig,AutoTokenizer,LlamaForCausalLM,LlamaTokenizer,Trainer,AutoModelForCausalLM,get_scheduler,BitsAndBytesConfig,OPTForCausalLM,LlamaModel
-import logging 
+import torch
+import torch.nn as nn
+from transformers import (
+    AutoConfig,AutoTokenizer,LlamaForCausalLM,LlamaTokenizer,Trainer,
+    AutoModelForCausalLM,get_scheduler,BitsAndBytesConfig,OPTForCausalLM,LlamaModel
+)
+import logging
 from peft import LoraConfig,PeftModel,TaskType,get_peft_model
 from trl import AutoModelForCausalLMWithValueHead
 from torch.optim import AdamW
-from peft.tuners.lora import LoraLayer 
-import deepspeed 
+from peft.tuners.lora import LoraLayer
+import deepspeed
 
+# 支持的模型类型映射
 MODEL_CLASSES = {
     "llama": (AutoConfig, LlamaTokenizer, LlamaForCausalLM),
     "opt": (AutoConfig, AutoTokenizer, OPTForCausalLM),
@@ -16,14 +26,20 @@ MODEL_CLASSES = {
 }
 
 
-
 def print_trainable_params(model) -> None:
-    # Adopted from https://github.com/LLaMA-Efficient-Tuning-main/src/utils/other.py
+    """
+    打印模型的参数统计信息
+
+    参考实现: https://github.com/LLaMA-Efficient-Tuning-main/src/utils/other.py
+
+    Args:
+        model: 要分析的PyTorch模型
+    """
     trainable_params, all_param = 0, 0
 
     for name, param in model.named_parameters():
         num_params = param.numel()
-        # if using DS Zero 3 and the weights are initialized empty
+        # 处理DeepSpeed Zero 3的情况（权重可能为空）
         if num_params == 0 and hasattr(param, "ds_numel"):
             num_params = param.ds_numel
         all_param += num_params

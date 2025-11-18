@@ -1,12 +1,20 @@
+# 数据整理器模块 - 负责将原始数据批处理成模型输入格式
+#
+# 本模块提供了多种数据整理器：
+# 1. DataCollatorForSupervisedDataset: 用于监督学习的数据整理
+# 2. PPODataCollatorWithPadding: 用于PPO训练的数据整理，支持倒序prompt
+# 3. PairDataCollatorWithPadding: 用于成对比较的数据整理
+
 import torch
 import transformers
-from transformers import DataCollatorWithPadding, BatchEncoding, PreTrainedTokenizerBase
-from transformers.modeling_utils import PreTrainedModel
-from transformers.tokenization_utils import PreTrainedTokenizer
-from typing import Optional, Dict, Sequence, Union, List
+from transformers import (
+    DataCollatorWithPadding, BatchEncoding, PreTrainedTokenizerBase,
+    PreTrainedModel, PreTrainedTokenizer
+)
+from typing import Optional, Dict, Sequence, Union, List, Any
 from dataclasses import dataclass
-from typing import Any, List, Union, Optional, Dict
 
+# 损失计算中忽略的标签索引
 IGNORE_INDEX=-100
 
 @dataclass

@@ -1,7 +1,14 @@
+# 参数解析模块 - 定义和管理训练所需的各种参数
+#
+# 本模块定义了以下参数类：
+# 1. ModelArguments: 模型相关参数
+# 2. DataTrainingArguments: 数据相关参数
+# 3. FinetuningArguments: 训练和微调参数
+
 import sys,os,logging
 import transformers
 from transformers import HfArgumentParser,TrainingArguments
-from dataclasses import dataclass, field 
+from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 import datasets 
 

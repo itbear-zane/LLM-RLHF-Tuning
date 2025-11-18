@@ -1,40 +1,87 @@
+# PPO训练器模块 - 使用PEFT进行PPO强化学习训练的核心实现
+#
+# 本模块实现了PPO算法的完整训练流程，包括：
+# 1. Actor-Critic模型的前向传播和反向传播
+# 2. 经验数据的收集和处理
+# 3. PPO损失函数的计算
+# 4. 优势函数的计算和归一化
+# 5. KL散度惩罚的实现
+# 6. 多任务学习支持
+
 import re
 from typing import List, Tuple
 import torch, os, sys, math, logging, random, time, warnings, shutil, copy
 from tqdm import tqdm
 
+# 添加上级目录到路径
 sys.path.append("..")
+
+# 导入Transformers相关模块
 from transformers import Trainer,get_scheduler,PreTrainedModel,GenerationConfig
+# 导入PyTorch相关模块
 from torch.utils.data import DataLoader, RandomSampler
 from accelerate import Accelerator
 from torch.optim import AdamW,Adam
 import torch.nn.functional as F
 from pathlib import Path
+# 导入PEFT相关模块
 from peft import get_peft_model,get_peft_model_state_dict,PeftModel
-import torch.nn as nn 
+import torch.nn as nn
 from datasets import Dataset
 from trl import AutoModelForCausalLMWithValueHead
 
+# 设置日志记录器
 logger = logging.getLogger(__name__)
 
-WEIGHTS_NAME = "adapter_model.bin"
-TRAINING_ARGS_NAME = "training_args.bin"
+# 常量定义
+WEIGHTS_NAME = "adapter_model.bin"  # 模型权重文件名
+TRAINING_ARGS_NAME = "training_args.bin"  # 训练参数文件名
 
 
 class PPOModel(nn.Module):
-    # see from: https://github.com/huggingface/accelerate/issues/668
+    """
+    PPO模型包装器 - 将actor模型和critic模型组合在一起
+
+    这个类用于Accelerate分布式训练，它将actor和critic模型包装在一个模块中，
+    以确保在分布式环境下的正确处理。
+
+    参考: https://github.com/huggingface/accelerate/issues/668
+    """
     def __init__(self, actor_model, critic_model):
+        """
+        初始化PPO模型
+
+        Args:
+            actor_model: Actor模型（策略网络）
+            critic_model: Critic模型（价值网络）
+        """
         super().__init__()
-        self.actor_model = actor_model 
-        self.critic_model = critic_model 
-    
+        self.actor_model = actor_model
+        self.critic_model = critic_model
+
     def forward(self, sequences, extra_inputs=None):
+        """
+        前向传播
+
+        Args:
+            sequences: 包含input_ids和attention_mask的字典
+            extra_inputs: 额外任务的输入（可选）
+
+        Returns:
+            actor_logits: Actor模型的输出logits
+            critic_values: Critic模型的价值预测
+            extra_loss: 额外任务的损失（如果有的话）
+        """
+        # Actor模型预测下一个token的概率分布
         actor_logits = self.actor_model(**sequences, return_dict=True).logits
+        # Critic模型预测每个位置的价值
         critic_values = self.critic_model(**sequences)[-1]
+
+        # 处理额外任务的损失（用于多任务学习）
         if extra_inputs is not None:
             extra_loss = self.actor_model(**extra_inputs, return_dict=True).loss
         else:
-            extra_loss = 0.0  
+            extra_loss = 0.0
         return actor_logits, critic_values, extra_loss
     
     
