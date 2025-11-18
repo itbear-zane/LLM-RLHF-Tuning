@@ -95,8 +95,10 @@ class PPOEngine():
         )
         
         if self.model_args.actor_peft_path is not None:
+            # 情况 A (断点续训): 如果提供了 actor_peft_path，直接加载之前的 LoRA 权重 (PeftModel.from_pretrained)，并设置为可训练
             model = PeftModel.from_pretrained(model, self.model_args.actor_peft_path, is_trainable=True)
         else:
+            # 如果没有提供路径，则创建一个全新的 LoraConfig，并将 LoRA 适配器挂载到 SFT 模型上
             lora_config = LoraConfig(
                 task_type=TaskType.CAUSAL_LM,
                 inference_mode=False,
@@ -114,13 +116,14 @@ class PPOEngine():
         return model 
 
     def _init_critic(self):
-        
+        # (SFT + Reward LoRA Merged) + New LoRA
         confppoig_class, tokenizer_class, model_class = MODEL_CLASSES[self.model_args.model_type]
         model = model_class.from_pretrained(
             self.model_args.sft_model_path,
             from_tf=bool(".ckpt" in self.model_args.sft_model_path),
             **self.config_kwargs
         )
+        # Reward Model（没有挂载 LoRA）
         model = PeftModel.from_pretrained(model, self.model_args.reward_lora_path)
         model = model.merge_and_unload()
 
@@ -140,10 +143,13 @@ class PPOEngine():
             model = get_peft_model(model, peft_config=lora_config)
 
         ## add value head 
+        ## AutoModelForCausalLMWithValueHead 是 trl 库的一个包装器。它在原本的 LLM 脑袋上，硬生生多加了一个线性层（Linear Layer）
         model = AutoModelForCausalLMWithValueHead.from_pretrained(model)
         # load v_head 
         reward_model_state_dict = torch.load(os.path.join(self.model_args.reward_lora_path, 'adapter_model.bin'))
         
+        ## 在 PPO 训练开始的第一秒，Critic 模型应该等同于 Reward Model。
+        ## 因为 Critic 的目标就是去拟合 Reward，所以直接拿 Reward Model 的参数来初始化，起点最高
         if self.model_args.critic_peft_path is not None:
             lora_state_dict = torch.load(os.path.join(self.model_args.critic_peft_path, 'adapter_model.bin'))
             model.v_head.load_state_dict({
@@ -156,7 +162,7 @@ class PPOEngine():
                     "summary.bias": reward_model_state_dict["v_head.summary.bias"]
                 })
             
-        
+        # 把 Reward Model 的头，存一份在显存里，标记为 "reward_head_weight"，永远不变
         model.register_buffer("reward_head_weight", reward_model_state_dict["v_head.summary.weight"])
         model.register_buffer("reward_head_bias", reward_model_state_dict["v_head.summary.bias"])
         model.register_buffer("critic_head_weight", reward_model_state_dict["v_head.summary.weight"])
